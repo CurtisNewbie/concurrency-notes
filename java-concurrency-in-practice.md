@@ -178,7 +178,7 @@ Thread 的 `interrupt` 方法用于中断线程, 实际是线程中的一个 boo
 2. 恢复中断:
     - 如果不希望当前线程被中断, 可捕获该异常然后调用 `Thread.currentThread().interrupt()`, 该方法会再次改变 `is_interrupted` 状态, 使得线程继续工作.
 
-```
+```java
 try {
 
     ...
@@ -235,7 +235,7 @@ Semaphore 或者 Counting Semaphore 用来控制同时访问某个资源或进�
 
 例如, 只允许同时有三个线程做 doSomthing()
 
-```
+```java
     Semaphore sem = new Semaphore(3);
 
     void doSomething() {
@@ -255,7 +255,7 @@ Semaphore 或者 Counting Semaphore 用来控制同时访问某个资源或进�
 
 例如, 使用 **CyclicBarrier** 来确保三个线程都同时 (或者说, 等待未完成) 通过栅栏. 假如我们有一个工作可以被切分为3个部分来计算, 我们创建了三个线程各自运算一部分, 我们要求三个部分都完成的情况下才 commit 结果, 代码则会如下.
 
-```
+```java
 CyclicBarrier barrier = new CyclicBarrier(3, () -> {
     commitResult();
 });
@@ -314,7 +314,7 @@ void doCalculation() {
 
 如:
 
-```
+```java
 CompletionService<?> cs = new ExecutorCompletionService<?>(executor);
 
 // submit N callable
@@ -342,7 +342,7 @@ Java 没有提供安全终止线程的方法, 但是提供一种 **Interruption*
 
 如:
 
-```
+```java
 volatile boolean canceled;
 
 while(!canceled){
@@ -457,7 +457,7 @@ N_threads = N_cpu * U_cpu * ( 1 + W_time/C_time)
 
 如, 在转账时, 我们可能会:
 
-```
+```java
 synchronized (fromAcc) {
     synchronized (toAcc) {
         // doTransfer(...)
@@ -469,7 +469,7 @@ synchronized (fromAcc) {
 
 如, 永远都先锁 hashCode 较小的对象, 当 hashCode 相同时用第三锁
 
-```
+```java
 if (fromAccHash < toAccHash) {
     synchronized (fromAcc) {
         synchronized (toAcc) {
@@ -499,7 +499,7 @@ if (fromAccHash < toAccHash) {
 
 如, 有下面两个互相协作的类, 一个是 taxi dispatcher, 另一个代表 taxi.
 
-```
+```java
 class Taxi {
 
     synchronized Point getLocation();
