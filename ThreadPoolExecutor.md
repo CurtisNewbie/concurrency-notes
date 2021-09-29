@@ -120,7 +120,7 @@ public void execute(Runnable command) {
 
 1. 当调用 `Executor.execute(Runnable)` 方法时，`ThreadPoolExecutor` 首先会检查我们当前线程的数量是否超过 `corePoolSize`， 如果没有，我们直接创建新线程 `Worker`，而传入的 `Runnable` 则作为这个线程第一个被执行的任务 `firstTask`。注意 `addWorker` 方法返回 `boolean` 值，代表该操作是否成功，因为这里并没有使用锁，所以是可能失败的。例如，尝试创建 `Worker` 线程的时候发现超过 `maximumPoolSize` 时。
 2. 如果创建新线程 `Worker` 失败，我们确保线程池仍然运行，然后我们将 `Runnable` 放入 `BlockingQueue<Runnable>` 里，等待其他 `Worker` 进行拉取。
-3. 如果我们没有办法把 `Runnable` 放入 `BlockingQueue<Runnable>` 中，那么代表线程池正在关闭，或者，我们的 `BlockingQueue` 已经满了，我们拒绝这个任务。
+3. 如果我们没有办法把 `Runnable` 放入 `BlockingQueue<Runnable>` 中，我们再次尝试创建一个新的 `Worker`，使用的 bound 值为 `maximumPoolSize`，如果失败，也就是说当前的线程数已经超过了 `maximumPoolSize`，我们拒绝这个任务。
 
 ## addWorker(Runnable, boolean) 方法和 Worker.run() 方法
 
