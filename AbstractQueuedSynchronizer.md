@@ -109,23 +109,23 @@ static final class Node {
     - `SIGNAL = -1`
         - 代表当前节点的 `next` 或 successor 节点需要被在当前节点释放锁的时候被唤醒
     - `CONDITION = -2`
-        - 代表当前节点正在等待 condition
+        - 代表当前节点正在等待 condition，只有在 `ConditionObject` 中维护的条件队列中使用
     - `PROPAGATE = -3`
         - 代表当前下一个 `acquireShared` 可以无条件的 propagate
     - `0`
-        - 初始值，刚加入队列
+        - 初始值，刚加入 CLH 队列 (也叫同步队列 sync queue)
 - `Node prev`
     - 上一个节点 predecessor
 - `Node next`
     - 下一个节点 successor
 - `Node nextWaiter`
-    - **还不知道**
+    - 下一个条件队列中的 `waiter`，只用于 `ConditionObject` 维护的条件队列
 - `Thread thread`
     - 该节点代表的线程, 可用于对线程唤醒 (unpark)
 
 # 4. AbstractQueuedSynchronizer 的 CLH 锁概念
 
-`AbstractQueuedSynchronizer` 基于 **CLH (Craig, Landin, and Hagersten) Lock Queue** 算法的变形。本质上就是，等待锁的线程使用 `LinkedList` 存储，每一个节点代表一个正在等待的线程。头节点 (`head`) 为已经获得锁的节点/线程。
+`AbstractQueuedSynchronizer` 基于 **CLH (Craig, Landin, and Hagersten) Lock Queue** 算法的变形。本质上就是，等待锁的线程使用 `LinkedList` 存储，每一个节点代表一个正在等待的线程。头节点 (`head`) 为已经获得锁的节点/线程。我们也叫这个队列 **Sync Queue** 同步队列。
 
 当一个已经拥有锁的线程 `head` 释放了锁，它会尝试唤醒它的 `next` 或 `successor`, 而这个节点会成为新的 `head`，如果 `successor` 里有取消等待的, 那么我们可以根据节点本身的状态 `waitStatus` 来判断是否需要跳过该节点。还句话来说，CLH queue 是从头节点 dequeue， 从尾节点 enqueue。当我们尝试获取锁，但当前已经有其他线程拥有了锁，那么我们会把当前线程作为节点，enqueue 到 CLH queue 的尾部，我们可以使用 CAS 去换 `tail` 节点，这个操作是原子性的，我们并不需要为这个操作使用同步。
 
