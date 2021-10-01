@@ -28,27 +28,21 @@ public abstract class AbstractOwnableSynchronizer
 `AbstractQueuedSynchronizer` 中的属性：
 
 ```java
-/**
-* Head of the wait queue, lazily initialized.  Except for
-* initialization, it is modified only via method setHead.  Note:
-* If head exists, its waitStatus is guaranteed not to be
-* CANCELLED.
-*/
-private transient volatile Node head;
+public abstract class AbstractQueuedSynchronizer
+    extends AbstractOwnableSynchronizer
+    implements java.io.Serializable {
 
-/**
-* Tail of the wait queue, lazily initialized.  Modified only via
-* method enq to add new wait node.
-*/
-private transient volatile Node tail;
+    private transient volatile Node head;
+    private transient volatile Node tail;
 
-/**
-* The synchronization state.
-*/
-private volatile int state;
+    /**
+    * The synchronization state.
+    */
+    private volatile int state;
 
-// inherited from AbstractOwnableSynchronizer
-private transient Thread exclusiveOwnerThread;
+    // inherited from AbstractOwnableSynchronizer
+    private transient Thread exclusiveOwnerThread;
+}
 ```
 
 核心的属性为以上四个：
@@ -405,7 +399,8 @@ final boolean acquireQueued(final Node node, int arg) {
 3. 先拿当前节点的 predecessor / prev 节点，查看前一个节点是否是 `head`，如果是 `head` 那么可能这个 CLH queue 刚初始化，那么此时没有线程-真的获得锁，我们可以尝试拿锁。如果拿了锁，拿当前节点就是 `head`，上一个节点会被抛弃 (所以有 `node.predecessor().next == null`)，返回 `false` 结束方法
 4. 如果上一个节点不是 `head` 或者当前线程没有拿到锁，我们尝试挂起当前线程，`pred` 是 predecessor 节点，`node` 是当前节点。
     - 该方法本质上就是，如果 `pred` 的状态 (`waitStatus`) 是 `SIGNAL`，那么代表当前节点会被唤醒，所以可以安全的挂起。
-    - 如果 `ws > 0`，这代表上一个节点状态为 `CANCELLED`，我们则需要跳过前面所有取消了的节点。除这些情况以外，我们可以确定 `pred` 不为取消，尝试更新 `pred` 为 `SIGNAL`，使得上一个节点在释放锁的时候会唤醒当前节点。如果这里更新了上一个节点状态为 `SIGNAL`，下一次进入这个方法则会 `return true`，因为这一次 `ws == Node.SIGNAL`。
+    - 如果 `ws > 0`，这代表上一个节点状态为 `CANCELLED`，我们则需要跳过前面所有取消了的节点。
+    - 除这些情况以外，我们可以确定 `pred` 不为取消，尝试更新 `pred` 为 `SIGNAL`，使得上一个节点在释放锁的时候会唤醒当前节点。如果这里更新了上一个节点状态为 `SIGNAL`，下一次进入这个方法则会 `return true`，因为这一次 `ws == Node.SIGNAL`。
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
@@ -451,32 +446,20 @@ private void cancelAcquire(Node node) {
     node.thread = null;
 
     // 1)
-    // Skip cancelled predecessors
     Node pred = node.prev;
     while (pred.waitStatus > 0)
         node.prev = pred = pred.prev;
 
-    // predNext is the apparent node to unsplice. CASes below will
-    // fail if not, in which case, we lost race vs another cancel
-    // or signal, so no further action is necessary, although with
-    // a possibility that a cancelled node may transiently remain
-    // reachable.
     Node predNext = pred.next;
 
     // 2)
-    // Can use unconditional write instead of CAS here.
-    // After this atomic step, other Nodes can skip past us.
-    // Before, we are free of interference from other threads.
     node.waitStatus = Node.CANCELLED;
 
     // 3)
-    // If we are the tail, remove ourselves.
     if (node == tail && compareAndSetTail(node, pred)) {
         pred.compareAndSetNext(predNext, null);
     } else {
         // 4)
-        // If successor needs signal, try to set pred's next-link
-        // so it will get one. Otherwise wake it up to propagate.
         int ws;
         if (pred != head &&
             ((ws = pred.waitStatus) == Node.SIGNAL ||
@@ -554,22 +537,11 @@ protected final boolean tryRelease(int releases) {
 ```java
 private void unparkSuccessor(Node node) {
     // 1)
-    /*
-    * If status is negative (i.e., possibly needing signal) try
-    * to clear in anticipation of signalling.  It is OK if this
-    * fails or if status is changed by waiting thread.
-    */
     int ws = node.waitStatus;
     if (ws < 0)
         node.compareAndSetWaitStatus(ws, 0);
 
     // 2)
-    /*
-    * Thread to unpark is held in successor, which is normally
-    * just the next node.  But if cancelled or apparently null,
-    * traverse backwards from tail to find the actual
-    * non-cancelled successor.
-    */
     Node s = node.next;
     if (s == null || s.waitStatus > 0) {
         s = null;
