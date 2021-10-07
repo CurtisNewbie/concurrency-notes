@@ -103,7 +103,7 @@ static final class Node {
 
 `AbstractQueuedSynchronizer` 基于 **CLH (Craig, Landin, and Hagersten) Lock Queue** 算法的变形。本质上就是，等待锁的线程使用 `LinkedList` 存储，每一个节点代表一个正在等待的线程。头节点 (`head`) 为已经获得锁的节点/线程。我们也叫这个队列 **Sync Queue** 同步队列。
 
-当一个已经拥有锁的线程 `head` 释放了锁，它会尝试唤醒它的 `next` 或 `successor`, 而这个节点会成为新的 `head`，如果 `successor` 里有取消等待的, 那么我们可以根据节点本身的状态 `waitStatus` 来判断是否需要跳过该节点。还句话来说，CLH queue 是从头节点 dequeue， 从尾节点 enqueue。当我们尝试获取锁，但当前已经有其他线程拥有了锁，那么我们会把当前线程作为节点，enqueue 到 CLH queue 的尾部，我们可以使用 CAS 去换 `tail` 节点，这个操作是原子性的，我们并不需要为这个操作使用同步。
+当一个已经拥有锁的线程 `head` 释放了锁，它会尝试唤醒它的 `next` 或 `successor`, 而这个节点会成为新的 `head`，如果 `successor` 里有取消等待的, 那么我们可以根据节点本身的状态 `waitStatus` 来判断是否需要跳过该节点。换句话来说，CLH queue 是从头节点 dequeue， 从尾节点 enqueue。当我们尝试获取锁，但当前已经有其他线程拥有了锁，那么我们会把当前线程作为节点，enqueue 到 CLH queue 的尾部，我们可以使用 CAS 去换 `tail` 节点，这个操作是原子性的，我们并不需要为这个操作使用同步。
 
 ```
      +------+  prev +-----+       +-----+
@@ -257,7 +257,7 @@ public final void acquire(int arg) {
 
 1. 首先通过 `tryAcquire` 尝试拿锁
 2. 如果没有拿到锁，我们尝试通过 `addWaiter` 方法将当前线程放入 CLH queue 中
-3. 然后我们通过 `acquireQueued` 方法，检查当前节点的 predecessor / prev 节点是否是 `head` 节点，如果是 `head` 节点，这个 `head` 节点可能是 CLH queue 第一次初始化的空节点，那么这个时候并没有任何线程持有锁，当前线程可以尝试争抢锁，如果再次争抢失败，则把当前-线程挂起，等待上一个节点结束唤醒当前线程
+3. 然后我们通过 `acquireQueued` 方法，检查当前节点的 predecessor / prev 节点是否是 `head` 节点 (`head` 节点的任务只是负责唤醒下一个节点, `head.thread` 肯定是 `null` 的, 我们可以认为 `head` 节点不包含在 sync queue 中). 如果是 `head` 节点，这个 `head` 节点可能是 sync queue 第一次初始化的空节点，那么这个时候并没有任何线程持有锁，当前线程可以尝试争抢锁，如果再次争抢失败，则把当前线程挂起, 等待上一个节点结束, 并且唤醒当前线程
 4. 当代码进入这一步，代表线程已经被唤醒了，如果在上一步发生了异常，`acquireQueued` 会返回 boolean 值为 `true`，代表我们需要使用 `Thread.interrupt()` 中断当前线程
 
 ## 8.2 ReentrantLock.FairSync 的 tryAcquire(int)
@@ -295,7 +295,7 @@ protected final boolean tryAcquire(int acquires) {
 ```
 
 1. 首先我们查看 AQS `state` 的值是否为 0，如果为 0 代表没有线程持有锁。但是这个方法不是线程安全的，我们仍需要使用 CAS 来尝试争抢锁
-2. 因为这是一个公平锁的实现，我们先检查 CLH queue 有没有正在排队的线程，如果有正在排队的线程，当前线程放弃线程争抢。因为我们知道 CLH queue 中下一个节点会被唤醒
+2. 因为这是一个公平锁的实现，我们先检查 CLH queue 有没有正在排队的线程，如果有正在排队的线程，当前线程放弃线程争抢。因为我们知道 CLH queue 中下一个节点会被唤醒, 放弃争抢也代表当前线程会被插入到 sync queue 的尾部，挂起并且等待被唤醒
 3. 如果已经有线程持有锁，我们检查是否当前线程持有锁，如果 `current == getExclusiveOwnerThread()`，我们则可以线程安全的修改 `state` 状态, 因为这是可重入锁，我们则更新 `state += 1` 并且 `return true`
 4. 获取锁失败，当前线程进入 CLH queue
 
@@ -342,7 +342,7 @@ Node(Node nextWaiter) {
 ```
 3. 要注意，这里是不停止的 for loop
 4. 如果 `tail` 不为 `null`，把当前节点放到 `tail` 后面去，这里的关键就是对 `tail` 使用 CAS, 如果我们能成功把当前节点作为 `tail`，我们可以安全的做以下事情: `node.prev = tail` 和 `tail.next = node`
-5. 如果 `tail` 为 `null`，那么尝试初始化 CLH queue，本质上就是把 `head` 和 `tail` 都设为新节点，这里非常关键。要关注的是，我们完全可以-先进入 5) 然后在下一个 loop 进入 4)
+5. 如果 `tail` 为 `null`，那么尝试初始化 CLH queue，本质上就是把 `head` 和 `tail` 都设为新节点，这里非常关键。要关注的是，我们完全可以-先进入 5) 然后在下一个 loop 进入 4). 我们也可以理解，当 `head == tail` 时 sync queue 是空的，也可以认为这个 sync queue 可能刚被初始化。
 
 ```java
 private final void initializeSyncQueue() {
@@ -388,10 +388,10 @@ final boolean acquireQueued(final Node node, int arg) {
 1. 该方法返回 boolean 值，代表当前线程是否需要被 interrupt
 2. 注意，这里是无停止条件的 for loop
 3. 先拿当前节点的 predecessor / prev 节点，查看前一个节点是否是 `head`，如果是 `head` 那么可能这个 CLH queue 刚初始化，那么此时没有线程-真的获得锁，我们可以尝试拿锁。如果拿了锁，拿当前节点就是 `head`，上一个节点会被抛弃 (所以有 `node.predecessor().next == null`)，返回 `false` 结束方法
-4. 如果上一个节点不是 `head` 或者当前线程没有拿到锁，我们尝试挂起当前线程，`pred` 是 predecessor 节点，`node` 是当前节点。
+4. 如果上一个节点不是 `head` (例如, 新插入到尾部的节点) 或者当前线程没有拿到锁 (例如，非公平锁的实现)，我们尝试挂起当前线程，`pred` 是 predecessor 节点，`node` 是当前节点。
     - 该方法本质上就是，如果 `pred` 的状态 (`waitStatus`) 是 `SIGNAL`，那么代表当前节点会被唤醒，所以可以安全的挂起。
     - 如果 `ws > 0`，这代表上一个节点状态为 `CANCELLED`，我们则需要跳过前面所有取消了的节点。
-    - 除这些情况以外，我们可以确定 `pred` 不为取消，尝试更新 `pred` 为 `SIGNAL`，使得上一个节点在释放锁的时候会唤醒当前节点. 如果这里更新了上一个节点状态为 `SIGNAL`，下一次进入这个方法则会 `return true`，因为这一次 `ws == Node.SIGNAL`。
+    - 除这些情况以外，我们可以确定 `pred` 要么为 0 要么为 `Node.PROPAGATE` (只用于共享锁, 所以对于 `ReentrantLock` 没有作用)，尝试更新 `pred` 为 `SIGNAL`，使得上一个节点在释放锁的时候会唤醒当前节点. 如果这里更新了上一个节点状态为 `SIGNAL`，下一次进入这个方法则会 `return true`，因为这一次 `ws == Node.SIGNAL`。
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
@@ -558,7 +558,7 @@ private void unparkSuccessor(Node node) {
 
 1. 如果当前节点 `waitStatus < 0`，我们尝试清除该状态，将 `waitStatus` 改为 0，毕竟我们需要唤醒的是下一个节点
 2. 从 `tail` 开始往前走，找到第一个非 `CANCELLED` 的 successor 节点，我们要做的就是唤醒这个 successor 节点
-3. 唤醒找到的 successor 节点，这个节点代表的线程就状态节点里
+3. 唤醒找到的 successor 节点，这个节点代表的线程就在节点的 `thread` 字段里
 
 ```java
 public static void unpark(Thread thread) {
