@@ -207,11 +207,11 @@ private boolean findNodeFromTail(Node node) {
 2. 如果当前 `node.next != null` 这保证该节点已经在队列中了，记住 `node.prev != null` 不代表当前节点已经成功放入队列，因为放入队列的 CAS 可能失败，而 `node.prev = pred` 是在 CAS 尝试之前就做了的 (不理解这里就看 AQS 的 `addWaiter` 方法)，也就是说，我们很可能在 CAS 失败的同时也设置了 `node.prev = pred`，导致 `node.prev != null`。
 3. 从 CLH 队列尾节点往前走，确保当前节点的确在 CLH 队列内。
 
-只要这个 `isOnSyncQueue(Node)` 方法返回 `true`，该节点就肯定在 CLH 队列内，我们就调用 `acquireQueued` 方法，尝试拿锁或者被挂起，等待-被唤醒。但是我们可以发现，在 `Condition.await()` 方法中，根本没有将节点从条件队列放到同步队列中的操作，当我们调用 `Condition.await()` 方法，当前线程一定在条件-队列中，并且被挂起，直到某一刻，我们把这个节点放到了 CLH 队列中，并且唤醒了它。只有这个时候它才会去争抢锁，或者-继续被挂起等待上一节点唤醒他。这个操作就是在 `Condition.signal()` 中发生的。 
+只要这个 `isOnSyncQueue(Node)` 方法返回 `true`，该节点就肯定在 CLH 队列内，我们就调用 `acquireQueued` 方法，尝试拿锁或者被挂起，等待被唤醒。但是我们可以发现，在 `Condition.await()` 方法中，根本没有将节点从条件队列放到同步队列中的操作，当我们调用 `Condition.await()` 方法，当前线程一定在条件-队列中，并且被挂起，直到某一刻，我们把这个节点放到了 CLH 队列中，并且唤醒了它。只有这个时候它才会去争抢锁，或者-继续被挂起等待上一节点唤醒他。这个操作就是在 `Condition.signal()` 中发生的。 
 
 ## 4. Condition 的 signal() 方法 
 
-该方法用于唤醒某一个被同一个 `Condition` 对象挂起的线程, 注意, 只有拥有锁的线程可以使用 `signal` 方法。记住，`signal` 方法并不会真的直接唤醒线程 (除特殊情况外), 只是把节点放到 CLH 队列中，由它在 CLH 队列中的 predecessor 唤醒，唤醒的线程是从 `Condition.await` 方法的第5步唤醒的，被唤醒的节点要做的事情就是调用 `acquireQueued` 方法，跟其他在 CLH 队列内的节点一样，排队拿锁, 拿不到就挂起等上一个节点唤醒。换句话来说，从 `Condition.await` 方法中被唤醒的线程，肯定拿着锁。
+该方法用于唤醒某一个被同一个 `Condition` 对象挂起的线程, 注意, 只有拥有锁的线程可以使用 `signal` 方法。记住，`signal` 方法并不会真的直接唤醒线程 (除特殊情况外), 只是把节点放到 CLH 队列中，由它在 CLH 队列中的 predecessor 唤醒，唤醒的线程是从 `Condition.await` 方法的第5步唤醒的，被唤醒的节点要做的事情就是调用 `acquireQueued` 方法，跟其他在 CLH 队列内的节点一样，排队拿锁, 拿不到就挂起等上一个节点唤醒。
 
 ```java
 public final void signal() {
@@ -247,7 +247,7 @@ private void doSignal(Node first) {
 1. 首先，我们检查第二个节点是否存在，也就是 `first.nextWaiter` 是否为 `null`，如果为 `null`，这代表条件队列为空，我们可以把 `lastWaiter` 也设为 `null`
 2. 如果第二个节点存在，我们把第二个节点设为 `firstWaiter`，跳过当前节点，因为我们将要把节点 `first` 移到 CLH 队列中
 3. 更新 `first` 节点的 `waitStatus` 为 0 (CLH 队列中新加入节点的默认 `waitStatus` 值)，并且尝试把 `first` 节点放到 
-CLH 队列的尾部。如果转移失败 (因为使用 CAS 更新 `first.waitStatus` 从 `CONDITION` 到 0 时失败，也可以认为这个节点为 `CANCELLED` 所以我们可以条)，我们尝试下一个节点进行转移
+CLH 队列的尾部。如果转移失败 (因为使用 CAS 更新 `first.waitStatus` 从 `CONDITION` 到 0 时失败，也可以认为这个节点为 `CANCELLED` 所以我们可以跳过)，我们尝试下一个节点进行转移
 
 ## 4.2 ConditionObject 的 transferForSignal(Node) 方法
 
