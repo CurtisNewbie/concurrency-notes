@@ -15,9 +15,6 @@ AbstractQueuedSynchronizer
 public abstract class AbstractOwnableSynchronizer
     implements java.io.Serializable {
 
-    /**
-     * The current owner of exclusive mode synchronization.
-     */
     private transient Thread exclusiveOwnerThread;
 
 }
@@ -34,10 +31,6 @@ public abstract class AbstractQueuedSynchronizer
 
     private transient volatile Node head;
     private transient volatile Node tail;
-
-    /**
-    * The synchronization state.
-    */
     private volatile int state;
 
     // inherited from AbstractOwnableSynchronizer
@@ -48,54 +41,37 @@ public abstract class AbstractQueuedSynchronizer
 核心的属性为以上四个：
 
 - `Node head` 
-    - 头节点，代表当前正在持有锁的节点
+    - 头节点 (没有特殊意义, 要记住 `head` 不是阻塞队列中的一员, 每一个节点都是被上一个节点唤醒的，如果是刚初始化的 sync queue, `head` 可能是一个空节点)
+    - 如果 `head == null` 或者 `head == tail`, 那么可以认为当前没有线程在 sync queue 中阻塞
+    - 并且 `head` 节点的 `thread` 是 `null`
 - `Node tail` 
     - 尾节点，代表阻塞队伍内最后的一个结点，新进入阻塞队伍的线程，都会作为新的节点，添加到队伍的尾部
 - `int state` 
-    - 同步的状态，0 代表没有被持有，大于 0 代表锁被持有，因为锁是可重入的，这个值可能会大于 1
+    - 同步的状态，对于 AQS 来说没有特别意义, 主要是给 AQS 的子类使用
+    - 对于 `ReentrantLock` 来说，0 代表没有线程持有锁，大于 0 代表锁被持有，因为锁是可重入的，这个值可能会大于 1
+    - 对于 `CountDownLatch` 来说，大于 0 代表共享锁无法被持用，需要阻塞。只有当 `state == 0`，共享锁才可以被持有
+    - 对于 `Semaphore` 来说，大于 0 代表还有共享锁可以获取, 而等于0 代表没有共享锁可以获取，需要阻塞
 - `Thread exclusiveOwnerThread` 
     - 记录持有锁的线程，继承于 `AbstractOwnableSynchronizer`
-    - 例如我们重入了我们已经持有的锁，此时 `Thread.currentThread() == exclusiveOwnerThread`，我们就可以 `state++;`
+    - 例如，在 `ReentrantLock` 中，我们重入了我们已经持有的锁, 那么此时当前线程就是 `exclusiveOwnerThread`, 我们也可以安全的 `state++;`
 
 # 3. AbstractQueuedSynchronizer.Node 中属性
 
 ```java
 static final class Node {
-    /** Marker to indicate a node is waiting in shared mode */
     static final Node SHARED = new Node();
-    /** Marker to indicate a node is waiting in exclusive mode */
     static final Node EXCLUSIVE = null;
 
-    /** waitStatus value to indicate thread has cancelled. */
     static final int CANCELLED =  1;
-    /** waitStatus value to indicate successor's thread needs unparking. */
     static final int SIGNAL    = -1;
-    /** waitStatus value to indicate thread is waiting on condition. */
     static final int CONDITION = -2;
-    /**
-    * waitStatus value to indicate the next acquireShared should
-    * unconditionally propagate.
-    */
     static final int PROPAGATE = -3;
 
     volatile int waitStatus;
-
     volatile Node prev;
-
     volatile Node next;
-
     volatile Thread thread;
 
-    /**
-    * Link to next node waiting on condition, or the special
-    * value SHARED.  Because condition queues are accessed only
-    * when holding in exclusive mode, we just need a simple
-    * linked queue to hold nodes while they are waiting on
-    * conditions. They are then transferred to the queue to
-    * re-acquire. And because conditions can only be exclusive,
-    * we save a field by using special value to indicate shared
-    * mode.
-    */
     Node nextWaiter;
 }
 ```
@@ -113,7 +89,7 @@ static final class Node {
     - `PROPAGATE = -3`
         - 代表当前下一个 `acquireShared` 可以无条件的 propagate
     - `0`
-        - 初始值，刚加入 CLH 队列 (也叫同步队列 sync queue)
+        - 初始值，刚加入 sync queue, 新加入的节点会把它的 predecessor 更新为 `SIGNAL`, 这样 predecessor 就会在释放锁的时候唤醒当前节点
 - `Node prev`
     - 上一个节点 predecessor
 - `Node next`
@@ -133,7 +109,7 @@ static final class Node {
      +------+  prev +-----+       +-----+
 head |      | <---- |     | <---- |     | tail
      |      | ----> |     | ----> |     |
-     +------+  next +-----+       +-----+
+     +------+       +-----+  next +-----+
 ```
 
 # 5. AbstractQueuedSynchronizer 需要被子类实现的方法
@@ -145,9 +121,9 @@ head |      | <---- |     | <---- |     | tail
 - `boolean tryRelease(int arg)`
     - 该方法被 `AbstractQueuedSynchronizer.release` 方法调用, 返回 `true` 则说明当前线程释放了锁, 对于可重入锁，只有当-所有重入的锁都被释放，该方法才会返回 `true`
 - `int tryAcquireShared(int arg)`
-    - **还不知道** 
+    - 该方法被 `AbstractQueuedSynchronizer.acquireShared` 方法调用, 用于获取共享锁
 - `boolean tryReleaseShared(int arg)`
-    - **还不知道** 
+    - 该方法被 `AbstractQueuedSynchronizer.releaseShared` 方法调用, 用于释放共享锁
 - `boolean isHeldExclusively()`
     - 返回锁当前线程是否被当前线程独占，对于 mutex lock, 该方法实现方式可能为: `return getExclusiveOwnerThread() == Thread.currentThread();`
 
@@ -209,7 +185,22 @@ protected final boolean tryAcquire(int acquires) {
 
 实现的主要区别是 `hasQueuedPredecessors()`，也就是我们是否优先 CLH queue 的等待线程。
 
-# 7. AQS 核心代码和 ReentrantLock.lock() 实现方式
+# 7. 非公平锁逻辑
+
+下面的例子解释了非公平锁运行的大致逻辑，或者说，为什么去除 `!hasQueuedPredecessors()` 方法就能达到非公平锁。假如 sync queue 中有以下节点且 `head` 线程仍在运行，未释放锁:
+
+```
+head -> t1 
+```
+
+1. `head` 对应的线程已完成，释放锁，将 `head` 此时状态从 `SIGNAL` 被更新为 0, `t1` 线程被唤醒, 但还没拿锁
+2. 在 `t1` 被唤醒但还没拿锁的时候，线程 `t2` 进入尝试拿锁，并且拿到了锁
+3. 此时 `t1` 拿锁失败，并且 `t1.prev` 仍然是 `head`, 调用 `shouldParkAfterFailedAcquire` 方法将 `head.waitStatus` 更新为 `SIGNAL`, 然后挂起
+4. `t2` 完成操作，释放锁，并且唤醒了 `head` 的下一个节点, 而这个节点仍然是 `t1`。
+
+如果是公平锁，那么 `t2` 一开始就不会成功，那就一定是 `t1` 拿到锁，并且 `t2` 作为 `t1` 节点的 successor，等待被唤醒。
+
+# 8. AQS 核心代码和 ReentrantLock.lock() 实现方式
 
 首先，当我们需要利用 AQS 实现获得锁和释放锁时，我们需要使用 AQS 的以下方法:
 
@@ -249,7 +240,7 @@ public void unlock() {
 
 对于 `unlock()` 方法，如果 AQS 当前有锁，但是当前线程不是持有锁的线程, 抛出异常。如果 `state > 1` 且当前线程持有锁，则更新 `state -= 1`。接下来看 AQS 内部的实现。
 
-## 7.1 AQS 的 acquire(int) 方法
+## 8.1 AQS 的 acquire(int) 方法
 
 ```java
 public final void acquire(int arg) {
@@ -269,7 +260,7 @@ public final void acquire(int arg) {
 3. 然后我们通过 `acquireQueued` 方法，检查当前节点的 predecessor / prev 节点是否是 `head` 节点，如果是 `head` 节点，这个 `head` 节点可能是 CLH queue 第一次初始化的空节点，那么这个时候并没有任何线程持有锁，当前线程可以尝试争抢锁，如果再次争抢失败，则把当前-线程挂起，等待上一个节点结束唤醒当前线程
 4. 当代码进入这一步，代表线程已经被唤醒了，如果在上一步发生了异常，`acquireQueued` 会返回 boolean 值为 `true`，代表我们需要使用 `Thread.interrupt()` 中断当前线程
 
-## 7.2 ReentrantLock.FairSync 的 tryAcquire(int)
+## 8.2 ReentrantLock.FairSync 的 tryAcquire(int)
 
 该方法负责判断当前线程是否持有锁:
 
@@ -308,7 +299,7 @@ protected final boolean tryAcquire(int acquires) {
 3. 如果已经有线程持有锁，我们检查是否当前线程持有锁，如果 `current == getExclusiveOwnerThread()`，我们则可以线程安全的修改 `state` 状态, 因为这是可重入锁，我们则更新 `state += 1` 并且 `return true`
 4. 获取锁失败，当前线程进入 CLH queue
 
-## 7.3 AQS 的 addWaiter(Node) 方法
+## 8.3 AQS 的 addWaiter(Node) 方法
 
 该方法负责将当前线程作为节点放入 CLH queue，放入以后会返回代表当前线程的节点
 
@@ -361,7 +352,7 @@ private final void initializeSyncQueue() {
 }
 ```
 
-## 7.4 AQS 的 acquireQueued(Node, int) 方法
+## 8.4 AQS 的 acquireQueued(Node, int) 方法
 
 该方法负责线程挂起和线程唤醒后对锁的争抢。
 
@@ -400,7 +391,7 @@ final boolean acquireQueued(final Node node, int arg) {
 4. 如果上一个节点不是 `head` 或者当前线程没有拿到锁，我们尝试挂起当前线程，`pred` 是 predecessor 节点，`node` 是当前节点。
     - 该方法本质上就是，如果 `pred` 的状态 (`waitStatus`) 是 `SIGNAL`，那么代表当前节点会被唤醒，所以可以安全的挂起。
     - 如果 `ws > 0`，这代表上一个节点状态为 `CANCELLED`，我们则需要跳过前面所有取消了的节点。
-    - 除这些情况以外，我们可以确定 `pred` 不为取消，尝试更新 `pred` 为 `SIGNAL`，使得上一个节点在释放锁的时候会唤醒当前节点。如果这里更新了上一个节点状态为 `SIGNAL`，下一次进入这个方法则会 `return true`，因为这一次 `ws == Node.SIGNAL`。
+    - 除这些情况以外，我们可以确定 `pred` 不为取消，尝试更新 `pred` 为 `SIGNAL`，使得上一个节点在释放锁的时候会唤醒当前节点. 如果这里更新了上一个节点状态为 `SIGNAL`，下一次进入这个方法则会 `return true`，因为这一次 `ws == Node.SIGNAL`。
 
 ```java
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
@@ -478,7 +469,15 @@ private void cancelAcquire(Node node) {
 }
 ```
 
-## 8. AQS 的 release(int) 方法
+# 9. AQS 核心代码和 ReentrantLock.unlock() 实现方式
+
+```java
+public void unlock() {
+    sync.release(1);
+}
+```
+
+# 9.1 AQS 的 release(int) 方法
 
 ```java
 public final boolean release(int arg) {
@@ -501,7 +500,7 @@ public final boolean release(int arg) {
 2. 如果释放锁成功，我们尝试唤醒 `head` 的下一个节点，也就是 successor，返回 `true` 代表我们释放锁成功
 3. 释放锁失败
 
-## 8.1 ReentrantLock.Sync 的 tryRelease(int) 方法  
+## 9.2 ReentrantLock.Sync 的 tryRelease(int) 方法  
 
 ```java
 protected final boolean tryRelease(int releases) {
@@ -530,7 +529,7 @@ protected final boolean tryRelease(int releases) {
 2. 检查 `state - releases` 是否等于 0, 这要考虑锁重入的情况， 如果 `c > 0` 那么代表我们还没释放所有重入的锁，`free` 仍然为 `false`
 3. 更新 `state` 状态，`state == 0` 代表无锁，`state > 0` 代表有锁，`state > 1` 代表存在锁的重入
 
-## 8.2 AbstractQueuedSynchronizer 的 unparkSuccessor(Node) 方法
+## 9.3 AbstractQueuedSynchronizer 的 unparkSuccessor(Node) 方法
 
 该方法负责唤醒当前节点的 successor
 
