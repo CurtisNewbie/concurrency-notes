@@ -119,7 +119,7 @@ private Node addConditionWaiter() {
 这一步，我们创建节点，将当前线程放入条件队列中，记住，这里我们仍然持有锁，所以 `addConditionWaiter()` 完全是线程安全的。
 
 1. `isHeldExclusively` 方法判断当前线程是否持有锁，因为这个方法只有当线程持有锁的情况才可以进入，不持有锁就抛异常
-2. 首先拿到 `lastWaiter`，也就是条件队列中的尾节点，如果 `lastWaiter` 不是 `CONDITION` 状态 (这是新加入条件队列节点的初始状态)，那么这代表 `lastWaiter` 已经是 `CANCELLED` 状态。那么此时我们调用 `unlinkCancelledWaiters()` 方法，从 `firstWaiter` 开始去除 `CANCELLED` 状态的节点，该方法会遍历整个条件队列
+2. 首先拿到 `lastWaiter`，也就是条件队列中的尾节点，如果 `lastWaiter` 不是 `CONDITION` 状态 (这是新加入条件队列节点的初始状态), 那么这代表 `lastWaiter` 已经是 `CANCELLED` 状态。那么此时我们调用 `unlinkCancelledWaiters()` 方法，从 `firstWaiter` 开始去除 `CANCELLED` 状态的节点，该方法会遍历整个条件队列
 
 ```java
 private void unlinkCancelledWaiters() {
@@ -207,11 +207,11 @@ private boolean findNodeFromTail(Node node) {
 2. 如果当前 `node.next != null` 这保证该节点已经在队列中了，记住 `node.prev != null` 不代表当前节点已经成功放入队列，因为放入队列的 CAS 可能失败，而 `node.prev = pred` 是在 CAS 尝试之前就做了的 (不理解这里就看 AQS 的 `addWaiter` 方法)，也就是说，我们很可能在 CAS 失败的同时也设置了 `node.prev = pred`，导致 `node.prev != null`。
 3. 从 CLH 队列尾节点往前走，确保当前节点的确在 CLH 队列内。
 
-只要这个 `isOnSyncQueue(Node)` 方法返回 `true`，该节点就肯定在 CLH 队列内，我们就调用 `acquireQueued` 方法，尝试拿锁或者被挂起，等待被唤醒。但是我们可以发现，在 `Condition.await()` 方法中，根本没有将节点从条件队列放到同步队列中的操作，当我们调用 `Condition.await()` 方法，当前线程一定在条件队列中，并且被挂起，直到某一刻，我们把这个节点放到了 CLH 队列中，并且唤醒了它。只有这个时候它才会去争抢锁，或者继续被挂起等待上一节点唤醒他。这个操作就是在 `Condition.signal()` 中发生的。 
+只要这个 `isOnSyncQueue(Node)` 方法返回 `true`，该节点就肯定在 CLH 队列内，我们就调用 `acquireQueued` 方法，尝试拿锁或者被挂起，等待-被唤醒。但是我们可以发现，在 `Condition.await()` 方法中，根本没有将节点从条件队列放到同步队列中的操作，当我们调用 `Condition.await()` 方法，当前线程一定在条件-队列中，并且被挂起，直到某一刻，我们把这个节点放到了 CLH 队列中，并且唤醒了它。只有这个时候它才会去争抢锁，或者-继续被挂起等待上一节点唤醒他。这个操作就是在 `Condition.signal()` 中发生的。 
 
 ## 4. Condition 的 signal() 方法 
 
-该方法用于唤醒某一个被同一个 `Condition` 对象挂起的线程, 注意, 只有拥有锁的线程可以使用 `signal` 方法。记住，`signal` 方法并不会真的直接唤醒线程 (除特殊情况外), 只是把节点放到 CLH 队列中，由它在 CLH 队列中的 predecessor 唤醒，唤醒的线程是从 `Condition.await` 方法的第5步唤醒的，被唤醒的节点要做的事情就是调用 `acquireQueued` 方法，跟其他在 CLH 队列内的节点一样，排队拿锁，拿不到就挂起等上一个节点唤醒。换句话来说，从 `Condition.await` 方法中被唤醒的线程，肯定拿着锁。
+该方法用于唤醒某一个被同一个 `Condition` 对象挂起的线程, 注意, 只有拥有锁的线程可以使用 `signal` 方法。记住，`signal` 方法并不会真的直接唤醒线程 (除特殊情况外), 只是把节点放到 CLH 队列中，由它在 CLH 队列中的 predecessor 唤醒，唤醒的线程是从 `Condition.await` 方法的第5步唤醒的，被唤醒的节点要做的事情就是调用 `acquireQueued` 方法，跟其他在 CLH 队列内的节点一样，排队拿锁, 拿不到就挂起等上一个节点唤醒。换句话来说，从 `Condition.await` 方法中被唤醒的线程，肯定拿着锁。
 
 ```java
 public final void signal() {
@@ -236,10 +236,8 @@ private void doSignal(Node first) {
         // 1)
         if ( (firstWaiter = first.nextWaiter) == null)
             lastWaiter = null;
-
         // 2)
         first.nextWaiter = null;
-
         // 3)
     } while (!transferForSignal(first) &&
                 (first = firstWaiter) != null);
