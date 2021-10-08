@@ -204,10 +204,10 @@ private boolean findNodeFromTail(Node node) {
 ```
 
 1. 如果当前节点的 `waitStatus` 仍然是 `CONDITION`，这代表该节点仍然在条件队列中，因为在 CLH 队列中的节点默认都是 0。如果 `node.prev == null`，这也代表该结点不在队列中，因为即使新节点放入新 CLH 队列，也会初始化一个空节点
-2. 如果当前 `node.next != null` 这保证该节点已经在队列中了，记住 `node.prev != null` 不代表当前节点已经成功放入队列，因为放入队列的 CAS 可能失败，而 `node.prev = pred` 是在 CAS 尝试之前就做了的 (不理解这里就看 AQS 的 `addWaiter` 方法)，也就是说，我们很可能在 CAS 失败的同时也设置了 `node.prev = pred`，导致 `node.prev != null`。
+2. 如果当前 `node.next != null` 这保证该节点已经在队列中了，记住 `node.prev != null` 不代表当前节点已经成功放入队列，因为放-入队列的 CAS 可能失败，而 `node.prev = pred` 是在 CAS 尝试之前就做了的 (不理解这里就看 AQS 的 `addWaiter` 方法)，也就是说，我们-很可能在 CAS 失败的同时也设置了 `node.prev = pred`，导致 `node.prev != null`。
 3. 从 CLH 队列尾节点往前走，确保当前节点的确在 CLH 队列内。
 
-只要这个 `isOnSyncQueue(Node)` 方法返回 `true`，该节点就肯定在 CLH 队列内，我们就调用 `acquireQueued` 方法，尝试拿锁或者被挂起，等待被唤醒。但是我们可以发现，在 `Condition.await()` 方法中，根本没有将节点从条件队列放到同步队列中的操作，当我们调用 `Condition.await()` 方法，当前线程一定在条件-队列中，并且被挂起，直到某一刻，我们把这个节点放到了 CLH 队列中，并且唤醒了它。只有这个时候它才会去争抢锁，或者-继续被挂起等待上一节点唤醒他。这个操作就是在 `Condition.signal()` 中发生的。 
+只要这个 `isOnSyncQueue(Node)` 方法返回 `true`，该节点就肯定在 CLH 队列内，我们就调用 `acquireQueued` 方法，尝试拿锁或者被挂起, 等待被唤醒。但是我们可以发现，在 `Condition.await()` 方法中，根本没有将节点从条件队列放到同步队列中的操作，当我们调用 `Condition.await()` 方法，当前线程一定在条件-队列中，并且被挂起，直到某一刻，我们把这个节点放到了 CLH 队列中，并且唤醒了它。只有-这个时候它才会去争抢锁，或者-继续被挂起等待上一节点唤醒他。这个操作就是在 `Condition.signal()` 中发生的。 
 
 ## 4. Condition 的 signal() 方法 
 
