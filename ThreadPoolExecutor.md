@@ -118,13 +118,13 @@ public void execute(Runnable command) {
 }
 ```
 
-1. 当调用 `Executor.execute(Runnable)` 方法时，`ThreadPoolExecutor` 首先会检查我们当前线程的数量是否超过 `corePoolSize`， 如果没有，我们直接创建新线程 `Worker`，而传入的 `Runnable` 则作为这个线程第一个被执行的任务 `firstTask`。注意 `addWorker` 方法返回 `boolean` 值，代表该操作是否成功，因为这里并没有使用锁，所以是可能失败的。例如，尝试创建 `Worker` 线程的时候发现超过 `maximumPoolSize` 时。
-2. 如果创建新线程 `Worker` 失败，我们确保线程池仍然运行，然后我们将 `Runnable` 放入 `BlockingQueue<Runnable>` 里，等待其他 `Worker` 进行拉取。
+1. 当调用 `Executor.execute(Runnable)` 方法时，`ThreadPoolExecutor` 首先会检查我们当前线程的数量是否超过 `corePoolSize`， 如果没有，我们直接创建新线程 `Worker`，而传入的 `Runnable` 则作为这个线程第一个被执行的任务 `firstTask`。注意 `addWorker` 方法返回 `boolean` 值，代表该操作是否成功，因为这里并没有使用锁，所以是可能失败的。例如，尝试创建 `Worker` 线程的时候发现超过 `corePoolSize` 时。
+2. 如果创建新线程 `Worker` 失败，我们确保线程池仍然运行，然后我们将 `Runnable` 放入 `BlockingQueue<Runnable>` 里，等待 `Worker` 进行拉取。
 3. 如果我们没有办法把 `Runnable` 放入 `BlockingQueue<Runnable>` 中，我们再次尝试创建一个新的 `Worker`，使用的 bound 值为 `maximumPoolSize`，如果失败，也就是说当前的线程数已经超过了 `maximumPoolSize`，我们拒绝这个任务。
 
 ## addWorker(Runnable, boolean) 方法和 Worker.run() 方法
 
-除去一些对线程池状态和大小的判断，`addWorker` 方法核心的代码如下。本质上就是 `new Worker(Runnable).thread.start()`。因为 `Worker` 的构造器中自行使用了 `ThreadFactory` 创建了线程，所以我们并没有通过 `new Thread(new Worker).start()` 的方式运行。
+除去一些对线程池状态和大小的判断，`addWorker` 方法核心的代码如下。本质上就是 `new Worker(Runnable).thread.start()`. 因为 `Worker` 的构造器中自行使用了 `ThreadFactory` 创建了线程，所以我们并没有通过 `new Thread(new Worker).start()` 的方式运行。
 
 ```java
 private boolean addWorker(Runnable firstTask, boolean core) {
@@ -139,9 +139,6 @@ private boolean addWorker(Runnable firstTask, boolean core) {
             final ReentrantLock mainLock = this.mainLock;
             mainLock.lock();
             try {
-                // Recheck while holding lock.
-                // Back out on ThreadFactory failure or if
-                // shut down before lock acquired.
                 int c = ctl.get();
 
                 if (isRunning(c) ||
@@ -205,10 +202,6 @@ public void run() {
             // 1) 
             while (task != null || (task = getTask()) != null) {
                 w.lock();
-                // If pool is stopping, ensure thread is interrupted;
-                // if not, ensure thread is not interrupted.  This
-                // requires a recheck in second case to deal with
-                // shutdownNow race while clearing interrupt
                 if ((runStateAtLeast(ctl.get(), STOP) ||
                      (Thread.interrupted() &&
                       runStateAtLeast(ctl.get(), STOP))) &&
@@ -236,7 +229,7 @@ public void run() {
     }
 ```
 
-这个 `ThreadPoolExecutor.getTask()` 方法的核心是从 `BlockingQueue<Runnable> workQueue` 里拿任务。
+这个 `ThreadPoolExecutor.getTask()` 方法的核心是从 `BlockingQueue<Runnable> workQueue` 里拿任务。注意, 如果目前 worker 数量大于 `corePoolSize`, 我们使用限时的 `BlockingQueue.poll` 方法，如果是因为超时被中断，那么我们知道该 worker idle 的时间超过了 `keepAliveTime`，我们回收该线程，注意这里返回 `null` 会结束外层 `Worker.run()` 方法的无限循环，导致 worker 线程结束。
 
 ```java
 private Runnable getTask() {
@@ -370,7 +363,7 @@ protected <T> RunnableFuture<T> newTaskFor(Callable<T> callable) {
 
 ## FutureTask
 
-`FutureTask` 本质上就是 `Runnable` 和 `Callable` 上包的一层新的 `Runnable`。它通过封装传入的任务，在任务结束的时候，将状态进行管理，同时保存好任务返回的结果。
+`FutureTask` 本质上就是 `Runnable` 和 `Callable` 上包的一层新的 `Runnable`。它通过封装传入的任务，在任务结束的时候，将状态-进行管理，同时保存好任务返回的结果。
 
 我们首先看 `FutureTask.run()` 方法的实现。这段方法非常直接，我们记录这个 `FutureTask` 的状态，如果要尝试运行该 `FutureTask`, 它必须为 `NEW` 状态，然后我们直接调用内部的 `Callable.call()` 方法，并且保存好返回的结果。如果发生了异常，我们则保存好抛出的异常。
 
