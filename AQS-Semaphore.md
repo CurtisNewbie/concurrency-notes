@@ -81,7 +81,7 @@ protected final boolean tryReleaseShared(int releases) {
 }
 ```
 
-对于共享锁来说，并没有重入的概念，所以只要对 `state -= 1` 就是返回 `true`。
+对于共享锁来说，并没有重入的概念，所以只要对 `state += 1` 就是返回 `true`。
 
 # 2. AQS 相关代码
 
